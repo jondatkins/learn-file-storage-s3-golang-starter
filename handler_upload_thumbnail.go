@@ -70,10 +70,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusUnauthorized, "User is not video's owner", err)
 		return
 	}
-	// thumb := thumbnail{
-	// 	imageData,
-	// 	mediaType,
-	// }
 	data := []byte(imageData)
 	imageString := base64.StdEncoding.EncodeToString(data)
 	fmt.Println(imageString)
@@ -81,17 +77,13 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	// Create a data URL with the media type and base64 encoded image data. The format is:
 	// data:<media-type>;base64,<data>
 	// Store the URL in the thumbnail_url column in the database.
-	dataURL := fmt.Sprintf("data:%s;base64,%s", imageData, mediaType)
-	// videoThumbnails[videoID] = thumb
-	// thumbURL := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", "8091", videoID)
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, imageString)
 	vidMetaData.ThumbnailURL = &dataURL
 	err = cfg.db.UpdateVideo(vidMetaData)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error updating video", err)
 		return
 	}
-	// fmt.Println(thumbURL)
-	// vidMetaData.ThumbnailURL = &thumbURL
 	video, err := cfg.db.GetVideo(videoID)
 	vid := database.Video{
 		ID:           video.ID,
