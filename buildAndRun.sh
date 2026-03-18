@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
 # go build -o out && ./out
-go build -gcflags="all=-N -l" -o tubely && ./tubely
+chromium  http://localhost:8091/app/
+go build -gcflags="all=-N -l" -o tubely && ./tubely  
