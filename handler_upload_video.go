@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -114,4 +119,64 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	respondWithJSON(w, http.StatusOK, video)
+}
+
+func getVideoAspectRatio(filepath string) (string, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filepath)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	err := cmd.Run()
+	if err != nil {
+		// log.Fatal(err)
+		return "", fmt.Errorf("ffprobe error: %v", err)
+	}
+
+	var output struct {
+		Streams []struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &output); err != nil {
+		return "", fmt.Errorf("could not parse ffprobe output: %v", err)
+	}
+
+	if len(output.Streams) == 0 {
+		return "", errors.New("no vid streams found")
+	}
+	// aspectRatio := getAspectRatio(ffprobeData.Streams[0].Width, ffprobeData.Streams[0].Height)
+	// return aspectRatio, nil
+	width := output.Streams[0].Width
+	height := output.Streams[0].Height
+
+	if width == 16*height/9 {
+		return "16:9", nil
+	} else if height == 16*width/9 {
+		return "9:16", nil
+	}
+	return "other", nil
+}
+
+func getAspectRatio(width, height int) string {
+	targetAspectRatio := 16.0 / 9.0
+	targetAspectRatio2 := 9.0 / 16.0
+	tolerance := 0.01
+
+	aspectRatio := float64(width) / float64(height)
+
+	if math.Abs(aspectRatio-targetAspectRatio) < tolerance {
+		fmt.Println("Aspect ratio is within tolerance.")
+		return "16:9"
+	} else {
+		fmt.Println("Aspect ratio is outside tolerance.")
+	}
+	if math.Abs(aspectRatio-targetAspectRatio2) < tolerance {
+		fmt.Println("Aspect ratio is within tolerance.")
+		return "9:16"
+	} else {
+		fmt.Println("Aspect ratio is outside tolerance.")
+	}
+	return "other"
 }
