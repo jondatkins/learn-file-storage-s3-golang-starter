@@ -12,8 +12,6 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
 )
@@ -21,7 +19,6 @@ import (
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
 	const uploadLimit = 1 << 30
 	r.Body = http.MaxBytesReader(w, r.Body, int64(uploadLimit))
-
 	videoIDString := r.PathValue("videoID")
 	videoID, err := uuid.Parse(videoIDString)
 	if err != nil {
@@ -82,7 +79,22 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Error saving tempFile", err)
 		return
 	}
-	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	// create processed video here
+	processedVidPath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error processing video", err)
+		return
+	}
+	defer os.Remove(processedVidPath)
+
+	processedFile, err := os.Open(processedVidPath)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("processed file: ", processedVidPath)
+	defer processedFile.Close()
+
+	aspectRatio, err := getVideoAspectRatio(processedFile.Name())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error getting aspect ratio", err)
 		return
@@ -94,7 +106,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		keyPrefix = "portrait"
 	}
 
-	_, err = tempFile.Seek(0, io.SeekStart)
+	_, err = processedFile.Seek(0, io.SeekStart)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not reset file pointer", err)
 		return
@@ -102,16 +114,19 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	key := getAssetPath(mediaType)
 	key = fmt.Sprintf("/%s/%s", keyPrefix, key)
 	fmt.Println("key is ", key)
-	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      aws.String(cfg.s3Bucket),
-		Key:         aws.String(key),
-		Body:        tempFile,
-		ContentType: aws.String(mediaType),
-	})
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error Putting File Object to SW3 bucket", err)
-	}
+
+	// _, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+	// 	Bucket:      aws.String(cfg.s3Bucket),
+	// 	Key:         aws.String(key),
+	// 	Body:        processedFile,
+	// 	ContentType: aws.String(mediaType),
+	// })
+	// if err != nil {
+	// 	respondWithError(w, http.StatusInternalServerError, "Error Putting File Object to SW3 bucket", err)
+	// }
 	url := cfg.getObjectURL(key)
+	fmt.Println("url is: ", url)
+	// tubely-private-123478
 	video.VideoURL = &url
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
@@ -119,6 +134,21 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	respondWithJSON(w, http.StatusOK, video)
+}
+
+func processVideoForFastStart(filePath string) (string, error) {
+	outputFilePath := fmt.Sprintf("%s.%s", filePath, "processing")
+	// he command is ffmpeg and the arguments are -i, the input file path, -c, copy, -movflags, faststart, -f, mp4 and the output file path.
+	cmd := exec.Command("ffmpeg", "-i", filePath, "-c", "copy", "-movflags", "faststart", "-f", "mp4", outputFilePath)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("ffmpeg error: %v", err)
+	}
+	return outputFilePath, nil
 }
 
 func getVideoAspectRatio(filepath string) (string, error) {
@@ -129,7 +159,6 @@ func getVideoAspectRatio(filepath string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		// log.Fatal(err)
 		return "", fmt.Errorf("ffprobe error: %v", err)
 	}
 
